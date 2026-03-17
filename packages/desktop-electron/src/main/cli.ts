@@ -43,7 +43,7 @@ const root = dirname(fileURLToPath(import.meta.url))
 export function getSidecarPath() {
   const suffix = process.platform === "win32" ? ".exe" : ""
   const path = app.isPackaged
-    ? join(process.resourcesPath, `opencode-cli${suffix}`)
+    ? join((process as any).resourcesPath, `opencode-cli${suffix}`)
     : join(root, "../../resources", `opencode-cli${suffix}`)
   console.log(`[cli] Sidecar path resolved: ${path} (isPackaged: ${app.isPackaged})`)
   return path
