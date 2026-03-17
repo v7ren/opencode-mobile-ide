@@ -12,9 +12,9 @@ export function agentColor(name: string, custom?: string) {
 
 export function messageAgentColor(
   list: readonly { role: string; agent?: string }[] | undefined,
-  agents: readonly { name: string; color?: string }[],
+  agents: readonly { name: string; color?: string }[] | undefined,
 ) {
-  if (!list) return undefined
+  if (!list || !Array.isArray(agents)) return undefined
   for (let i = list.length - 1; i >= 0; i--) {
     const item = list[i]
     if (item.role !== "user" || !item.agent) continue

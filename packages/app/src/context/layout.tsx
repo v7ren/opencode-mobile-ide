@@ -249,6 +249,8 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         },
         session: {
           width: DEFAULT_SESSION_WIDTH,
+          mobileMenuMode: "sidebar" as "sidebar" | "files",
+          mobileMenuPress: 0,
         },
         mobileSidebar: {
           opened: false,
@@ -686,6 +688,24 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         },
         toggle() {
           setStore("mobileSidebar", "opened", (x) => !x)
+        },
+      },
+      sessionMobileMenu: {
+        mode: createMemo(() => store.session?.mobileMenuMode ?? "sidebar"),
+        pressCount: createMemo(() => store.session?.mobileMenuPress ?? 0),
+        setMode(mode: "sidebar" | "files") {
+          if (!store.session) {
+            setStore("session", { width: DEFAULT_SESSION_WIDTH, mobileMenuMode: mode, mobileMenuPress: 0 })
+          } else {
+            setStore("session", "mobileMenuMode", mode)
+          }
+        },
+        press() {
+          if (!store.session) {
+            setStore("session", { width: DEFAULT_SESSION_WIDTH, mobileMenuMode: "sidebar", mobileMenuPress: 1 })
+          } else {
+            setStore("session", "mobileMenuPress", (store.session.mobileMenuPress ?? 0) + 1)
+          }
         },
       },
       pendingMessage: {

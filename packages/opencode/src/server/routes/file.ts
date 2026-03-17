@@ -2,13 +2,85 @@ import { Hono } from "hono"
 import { describeRoute, validator, resolver } from "hono-openapi"
 import z from "zod"
 import { File } from "../../file"
+import { FileWatcher } from "../../file/watcher"
 import { Ripgrep } from "../../file/ripgrep"
 import { LSP } from "../../lsp"
 import { Instance } from "../../project/instance"
+import { Bus } from "../../bus"
+import { Filesystem } from "../../util/filesystem"
 import { lazy } from "../../util/lazy"
+import { errors } from "../error"
+import path from "path"
 
 export const FileRoutes = lazy(() =>
   new Hono()
+    .put(
+      "/file/content",
+      describeRoute({
+        summary: "Write file",
+        description: "Write content to a specified text file. Only text files are supported.",
+        operationId: "file.write",
+        responses: {
+          200: {
+            description: "File written successfully",
+            content: {
+              "application/json": {
+                schema: resolver(z.boolean()),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          path: z.string(),
+          content: z.string(),
+          encoding: z.literal("utf-8").optional(),
+        }),
+      ),
+      async (c) => {
+        const { path: filePath, content } = c.req.valid("json")
+        const full = path.join(Instance.directory, filePath)
+
+        if (!Instance.containsPath(full)) {
+          return c.json({ message: "Access denied: path escapes project directory" }, 403)
+        }
+
+        // Check if file is binary by extension (reuse logic from file/index.ts)
+        const binaryExtensions = new Set([
+          "exe", "dll", "pdb", "bin", "so", "dylib", "o", "a", "lib", "wav", "mp3", "ogg", "oga", "ogv", "ogx",
+          "flac", "aac", "wma", "m4a", "weba", "mp4", "avi", "mov", "wmv", "flv", "webm", "mkv", "zip", "tar",
+          "gz", "gzip", "bz", "bz2", "bzip", "bzip2", "7z", "rar", "xz", "lz", "z", "pdf", "doc", "docx",
+          "ppt", "pptx", "xls", "xlsx", "dmg", "iso", "img", "vmdk", "ttf", "otf", "woff", "woff2", "eot",
+          "sqlite", "db", "mdb", "apk", "ipa", "aab", "xapk", "app", "pkg", "deb", "rpm", "snap", "flatpak",
+          "appimage", "msi", "msp", "jar", "war", "ear", "class", "kotlin_module", "dex", "vdex", "odex",
+          "oat", "art", "wasm", "wat", "bc", "ll", "s", "ko", "sys", "drv", "efi", "rom", "com", "cmd",
+          "ps1", "sh", "bash", "zsh", "fish",
+        ])
+        
+        const imageExtensions = new Set([
+          "png", "jpg", "jpeg", "gif", "bmp", "webp", "ico", "tif", "tiff", "svg", "svgz", "avif", "apng",
+          "jxl", "heic", "heif", "raw", "cr2", "nef", "arw", "dng", "orf", "raf", "pef", "x3f",
+        ])
+
+        const ext = path.extname(filePath).toLowerCase().slice(1)
+        if (binaryExtensions.has(ext) || imageExtensions.has(ext)) {
+          return c.json({ message: "Cannot write binary or image files" }, 400)
+        }
+
+        // Write the file
+        await Filesystem.write(full, content)
+
+        // Publish events for watcher/LSP integration
+        await Bus.publish(File.Event.Edited, { file: full })
+        await Bus.publish(FileWatcher.Event.Updated, { file: full, event: "change" })
+        await LSP.touchFile(full, true)
+
+        return c.json(true)
+      },
+    )
     .get(
       "/find",
       describeRoute({

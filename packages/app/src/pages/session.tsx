@@ -21,6 +21,7 @@ import { createStore } from "solid-js/store"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
 import { Select } from "@opencode-ai/ui/select"
 import { Tabs } from "@opencode-ai/ui/tabs"
+import { IconButton } from "@opencode-ai/ui/icon-button"
 import { createAutoScroll } from "@opencode-ai/ui/hooks"
 import { previewSelectedLines } from "@opencode-ai/ui/pierre/selection-bridge"
 import { Button } from "@opencode-ai/ui/button"
@@ -28,6 +29,7 @@ import { showToast } from "@opencode-ai/ui/toast"
 import { base64Encode, checksum } from "@opencode-ai/util/encode"
 import { useNavigate, useSearchParams } from "@solidjs/router"
 import { NewSessionView, SessionHeader } from "@/components/session"
+import FileTree from "@/components/file-tree"
 import { useComments } from "@/context/comments"
 import { getSessionPrefetch, SESSION_PREFETCH_TTL } from "@/context/global-sync/session-prefetch"
 import { useGlobalSync } from "@/context/global-sync"
@@ -49,6 +51,7 @@ import { SessionSidePanel } from "@/pages/session/session-side-panel"
 import { TerminalPanel } from "@/pages/session/terminal-panel"
 import { useSessionCommands } from "@/pages/session/use-session-commands"
 import { useSessionHashScroll } from "@/pages/session/use-session-hash-scroll"
+import { FileTabContent } from "@/pages/session/file-tabs"
 import { Identifier } from "@/utils/id"
 import { extractPromptFromParts } from "@/utils/prompt"
 import { same } from "@/utils/same"
@@ -498,7 +501,7 @@ export default function Page() {
 
   const [store, setStore] = createStore({
     messageId: undefined as string | undefined,
-    mobileTab: "session" as "session" | "changes",
+    mobileTab: "session" as "session" | "changes" | "files" | "file-view",
     changes: "session" as "session" | "turn",
     newSessionWorktree: "main",
     deferRender: false,
@@ -870,6 +873,8 @@ export default function Page() {
   }
 
   const mobileChanges = createMemo(() => !isDesktop() && store.mobileTab === "changes")
+  const mobileFiles = createMemo(() => !isDesktop() && store.mobileTab === "files")
+  const mobileFileView = createMemo(() => !isDesktop() && store.mobileTab === "file-view")
 
   const fileTreeTab = () => layout.fileTree.tab()
   const setFileTreeTab = (value: "changes" | "all") => layout.fileTree.setTab(value)
@@ -1649,24 +1654,73 @@ export default function Page() {
     if (fillFrame !== undefined) cancelAnimationFrame(fillFrame)
   })
 
+  // Check if any file tabs are open for mobile edit button
+  const hasOpenFileTabs = createMemo(() => {
+    return tabs().all().some((t: string) => t.startsWith("file://"))
+  })
+
+  const handleMobileEditClick = () => {
+    // Find first open file tab and switch to it
+    const fileTabs = tabs().all().filter((t: string) => t.startsWith("file://"))
+    if (fileTabs.length > 0) {
+      tabs().setActive(fileTabs[0])
+      setStore("mobileTab", "file-view")
+      layout.sessionMobileMenu.setMode("files")
+    }
+  }
+
+  // Listen for hamburger menu press in file mode
+  createEffect(
+    on(
+      () => [layout.sessionMobileMenu.pressCount(), mobileFileView()] as const,
+      ([pressCount, isFileView]) => {
+        if (pressCount > 0 && isFileView) {
+          setStore("mobileTab", "files")
+        }
+      },
+    ),
+  )
+
+  // Set sidebar mode when leaving file-view
+  createEffect(
+    on(
+      () => store.mobileTab,
+      (tab, prevTab) => {
+        if (prevTab === "file-view" && tab !== "file-view") {
+          layout.sessionMobileMenu.setMode("sidebar")
+        } else if (tab === "file-view" && prevTab !== "file-view") {
+          layout.sessionMobileMenu.setMode("files")
+        }
+      },
+    ),
+  )
+
   return (
     <div class="relative bg-background-base size-full overflow-hidden flex flex-col">
-      <SessionHeader />
+      <SessionHeader onEditClick={!isDesktop() && hasOpenFileTabs() ? handleMobileEditClick : undefined} />
       <div class="flex-1 min-h-0 flex flex-col md:flex-row">
         <Show when={!isDesktop() && !!params.id}>
           <Tabs value={store.mobileTab} class="h-auto">
             <Tabs.List>
               <Tabs.Trigger
                 value="session"
-                class="!w-1/2 !max-w-none"
+                class="!w-1/3 !max-w-none"
                 classes={{ button: "w-full" }}
                 onClick={() => setStore("mobileTab", "session")}
               >
                 {language.t("session.tab.session")}
               </Tabs.Trigger>
               <Tabs.Trigger
+                value="files"
+                class="!w-1/3 !max-w-none"
+                classes={{ button: "w-full" }}
+                onClick={() => setStore("mobileTab", "files")}
+              >
+                {language.t("session.files.all")}
+              </Tabs.Trigger>
+              <Tabs.Trigger
                 value="changes"
-                class="!w-1/2 !max-w-none !border-r-0"
+                class="!w-1/3 !max-w-none !border-r-0"
                 classes={{ button: "w-full" }}
                 onClick={() => setStore("mobileTab", "changes")}
               >
@@ -1689,56 +1743,97 @@ export default function Page() {
             width: sessionPanelWidth(),
           }}
         >
-          <div class="flex-1 min-h-0 overflow-hidden">
-            <Switch>
-              <Match when={params.id}>
-                <Show when={lastUserMessage()}>
-                  <MessageTimeline
-                    mobileChanges={mobileChanges()}
-                    mobileFallback={reviewContent({
-                      diffStyle: "unified",
-                      classes: {
-                        root: "pb-8",
-                        header: "px-4",
-                        container: "px-4",
-                      },
-                      loadingClass: "px-4 py-4 text-text-weak",
-                      emptyClass: "h-full pb-64 -mt-4 flex flex-col items-center justify-center text-center gap-6",
-                    })}
-                    actions={actions}
-                    scroll={ui.scroll}
-                    onResumeScroll={resumeScroll}
-                    setScrollRef={setScrollRef}
-                    onScheduleScrollState={scheduleScrollState}
-                    onAutoScrollHandleScroll={autoScroll.handleScroll}
-                    onMarkScrollGesture={markScrollGesture}
-                    hasScrollGesture={hasScrollGesture}
-                    onUserScroll={markUserScroll}
-                    onTurnBackfillScroll={historyWindow.onScrollerScroll}
-                    onAutoScrollInteraction={autoScroll.handleInteraction}
-                    centered={centered()}
-                    setContentRef={(el) => {
-                      content = el
-                      autoScroll.contentRef(el)
+          <div class="flex-1 min-h-0 overflow-hidden relative">
+            <Show when={mobileFiles()}>
+              <div class="absolute inset-0 overflow-auto bg-background-stronger px-3 py-4">
+                <FileTree
+                  path=""
+                  onFileClick={(node) => {
+                    const tabFile = file.tab(node.path)
+                    tabs().open(tabFile)
+                    tabs().setActive(tabFile)
+                    setStore("mobileTab", "file-view")
+                  }}
+                />
+              </div>
+            </Show>
+            {/* Mobile File View with Edit Toggle - Wrapped in Tabs */}
+            <Show when={mobileFileView() && activeFileTab()} keyed>
+              {(tab) => (
+                <div class="absolute inset-0 overflow-hidden bg-background-stronger flex flex-col">
+                  <div class="flex items-center justify-between px-4 py-2 border-b border-border-weaker-base bg-background-base">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <IconButton
+                        icon="arrow-left"
+                        variant="ghost"
+                        size="small"
+                        onClick={() => setStore("mobileTab", "session")}
+                        aria-label="Back to session"
+                      />
+                      <span class="text-sm text-text-base font-medium truncate flex-1">
+                        {tab.replace("file://", "").split("/").pop() ?? "File"}
+                      </span>
+                    </div>
+                  </div>
+                  <div class="flex-1 min-h-0 overflow-hidden">
+                    <Tabs value={tab}>
+                      <FileTabContent tab={tab} onShowFileTree={() => setStore("mobileTab", "files")} />
+                    </Tabs>
+                  </div>
+                </div>
+              )}
+            </Show>
+            <Show when={!mobileFiles() && !mobileFileView()}>
+              <Switch>
+                <Match when={params.id}>
+                  <Show when={lastUserMessage()}>
+                    <MessageTimeline
+                      mobileChanges={mobileChanges()}
+                      mobileFallback={reviewContent({
+                        diffStyle: "unified",
+                        classes: {
+                          root: "pb-8",
+                          header: "px-4",
+                          container: "px-4",
+                        },
+                        loadingClass: "px-4 py-4 text-text-weak",
+                        emptyClass: "h-full pb-64 -mt-4 flex flex-col items-center justify-center text-center gap-6",
+                      })}
+                      actions={actions}
+                      scroll={ui.scroll}
+                      onResumeScroll={resumeScroll}
+                      setScrollRef={setScrollRef}
+                      onScheduleScrollState={scheduleScrollState}
+                      onAutoScrollHandleScroll={autoScroll.handleScroll}
+                      onMarkScrollGesture={markScrollGesture}
+                      hasScrollGesture={hasScrollGesture}
+                      onUserScroll={markUserScroll}
+                      onTurnBackfillScroll={historyWindow.onScrollerScroll}
+                      onAutoScrollInteraction={autoScroll.handleInteraction}
+                      centered={centered()}
+                      setContentRef={(el) => {
+                        content = el
+                        autoScroll.contentRef(el)
 
-                      const root = scroller
-                      if (root) scheduleScrollState(root)
-                    }}
-                    turnStart={historyWindow.turnStart()}
-                    historyMore={historyMore()}
-                    historyLoading={historyLoading()}
-                    onLoadEarlier={() => {
-                      void historyWindow.loadAndReveal()
-                    }}
-                    renderedUserMessages={historyWindow.renderedUserMessages()}
-                    anchor={anchor}
-                  />
-                </Show>
-              </Match>
-              <Match when={true}>
-                <NewSessionView worktree={newSessionWorktree()} />
-              </Match>
-            </Switch>
+                        const root = scroller
+                        if (root) scheduleScrollState(root)
+                      }}
+                      turnStart={historyWindow.turnStart()}
+                      historyMore={historyMore()}
+                      historyLoading={historyLoading()}
+                      onLoadEarlier={() => {
+                        void historyWindow.loadAndReveal()
+                      }}
+                      renderedUserMessages={historyWindow.renderedUserMessages()}
+                      anchor={anchor}
+                    />
+                  </Show>
+                </Match>
+                <Match when={true}>
+                  <NewSessionView worktree={newSessionWorktree()} />
+                </Match>
+              </Switch>
+            </Show>
           </div>
 
           <SessionComposerRegion

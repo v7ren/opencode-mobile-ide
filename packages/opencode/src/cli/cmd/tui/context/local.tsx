@@ -38,9 +38,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       const agents = createMemo(() => sync.data.agent.filter((x) => x.mode !== "subagent" && !x.hidden))
       const visibleAgents = createMemo(() => sync.data.agent.filter((x) => !x.hidden))
       const [agentStore, setAgentStore] = createStore<{
-        current: string
+        current: string | undefined
       }>({
-        current: agents()[0].name,
+        current: agents()[0]?.name,
       })
       const { theme } = useTheme()
       const colors = createMemo(() => [
@@ -57,7 +57,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           return agents()
         },
         current() {
-          return agents().find((x) => x.name === agentStore.current)!
+          const current = agentStore.current
+          if (!current) return agents()[0]
+          return agents().find((x) => x.name === current) ?? agents()[0]
         },
         set(name: string) {
           if (!agents().some((x) => x.name === name))
@@ -70,11 +72,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         },
         move(direction: 1 | -1) {
           batch(() => {
-            let next = agents().findIndex((x) => x.name === agentStore.current) + direction
-            if (next < 0) next = agents().length - 1
-            if (next >= agents().length) next = 0
-            const value = agents()[next]
-            setAgentStore("current", value.name)
+            const agentList = agents()
+            if (agentList.length === 0) return
+            const current = agentStore.current ?? agentList[0]?.name
+            let next = agentList.findIndex((x) => x.name === current) + direction
+            if (next < 0) next = agentList.length - 1
+            if (next >= agentList.length) next = 0
+            const value = agentList[next]
+            if (value) setAgentStore("current", value.name)
           })
         },
         color(name: string) {

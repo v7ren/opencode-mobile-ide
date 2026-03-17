@@ -73,7 +73,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
     const tree = createFileTreeStore({
       scope,
       normalizeDir: path.normalizeDir,
-      list: (dir) => sdk.client.file.list({ path: dir }).then((x) => x.data ?? []),
+      list: (dir) => sdk.client.file.list({ path: dir }).then((x) => Array.isArray(x.data) ? x.data : []),
       onError: (message) => {
         showToast({
           variant: "error",
@@ -155,6 +155,55 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       })
     }
 
+    const save = async (input: string, content: string): Promise<boolean> => {
+      const file = path.normalize(input)
+      if (!file) return false
+
+      const currentState = store.file[file]
+      if (!currentState) return false
+
+      try {
+        // Use the SDK's base URL for the fetch
+        const baseUrl = sdk.url ?? ""
+        const response = await fetch(`${baseUrl}/file/content`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ path: file, content }),
+        })
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}))
+          throw new Error(error.message || `Save failed: ${response.status}`)
+        }
+
+        // Update local state to reflect saved content
+        setStore(
+          "file",
+          file,
+          produce((draft) => {
+            if (draft.content) {
+              draft.content.content = content
+            }
+          }),
+        )
+
+        if (currentState.content) {
+          touchFileContent(file, approxBytes(currentState.content))
+        }
+
+        return true
+      } catch (e) {
+        showToast({
+          variant: "error",
+          title: language.t("toast.file.loadFailed.title"),
+          description: errorMessage(e, language.t("common.requestFailed")),
+        })
+        return false
+      }
+    }
+
     const load = (input: string, options?: { force?: boolean }) => {
       const file = path.normalize(input)
       if (!file) return Promise.resolve()
@@ -196,7 +245,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
 
     const search = (query: string, dirs: "true" | "false") =>
       sdk.client.find.files({ query, dirs }).then(
-        (x) => (x.data ?? []).map(path.normalize),
+        (x) => (Array.isArray(x.data) ? x.data : []).map(path.normalize),
         () => [],
       )
 
@@ -267,6 +316,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       },
       get,
       load,
+      save,
       scrollTop,
       scrollLeft,
       setScrollTop,

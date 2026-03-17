@@ -62,7 +62,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const models = useModels()
 
     const id = createMemo(() => params.id || undefined)
-    const list = createMemo(() => sync.data.agent.filter((item) => item.mode !== "subagent" && !item.hidden))
+    const list = createMemo(() => {
+      const agents = sync.data.agent
+      console.log("DEBUG local.tsx: sync.data.agent =", agents, "Array.isArray:", Array.isArray(agents))
+      if (!Array.isArray(agents)) return []
+      return agents.filter((item) => item.mode !== "subagent" && !item.hidden)
+    })
     const connected = createMemo(() => new Set(providers.connected().map((item) => item.id)))
 
     const [saved, setSaved] = persisted(
@@ -85,7 +90,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         variant?: string | null
       }
     }>({
-      current: list()[0]?.name,
+      current: undefined,
       draft: undefined,
       last: undefined,
     })
@@ -115,7 +120,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         if (store.current !== undefined) setStore("current", undefined)
         return
       }
-      if (items.some((item) => item.name === store.current)) return
+      // Auto-select first agent if none selected or current not in list
+      const current = store.current
+      const scopeAgent = scope()?.agent
+      if (!current && !scopeAgent) {
+        setStore("current", items[0]?.name)
+        return
+      }
+      if (items.some((item) => item.name === current)) return
       setStore("current", items[0]?.name)
     })
 

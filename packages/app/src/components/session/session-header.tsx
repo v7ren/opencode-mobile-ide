@@ -12,6 +12,7 @@ import { createEffect, createMemo, For, onCleanup, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Portal } from "solid-js/web"
 import { useCommand } from "@/context/command"
+import { useFile } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
 import { usePlatform } from "@/context/platform"
@@ -128,9 +129,10 @@ const showRequestError = (language: ReturnType<typeof useLanguage>, err: unknown
   })
 }
 
-export function SessionHeader() {
+export function SessionHeader(props: { onEditClick?: () => void }) {
   const layout = useLayout()
   const command = useCommand()
+  const file = useFile()
   const server = useServer()
   const platform = usePlatform()
   const language = useLanguage()
@@ -415,7 +417,19 @@ export function SessionHeader() {
                   </Show>
                 </div>
               </Show>
-              <div class="flex items-center gap-1">
+                <div class="flex items-center gap-1">
+                <Show when={props.onEditClick}>
+                  <Tooltip placement="bottom" value="Edit Files">
+                    <Button
+                      variant="ghost"
+                      class="titlebar-icon w-8 h-6 p-0 box-border"
+                      onClick={props.onEditClick}
+                      aria-label="Edit Files"
+                    >
+                      <Icon size="small" name="edit" />
+                    </Button>
+                  </Tooltip>
+                </Show>
                 <Tooltip placement="bottom" value={language.t("status.popover.trigger")}>
                   <StatusPopover />
                 </Tooltip>

@@ -557,12 +557,18 @@ export namespace Server {
       )
       .all("/*", async (c) => {
         const path = c.req.path
+        
+        // Try local Vite dev server first, fall back to production
+        const targetUrl = Installation.isLocal() 
+          ? `http://localhost:3000${path}`
+          : `https://app.opencode.ai${path}`
+        const targetHost = Installation.isLocal() ? "localhost:3000" : "app.opencode.ai"
 
-        const response = await proxy(`https://app.opencode.ai${path}`, {
+        const response = await proxy(targetUrl, {
           ...c.req,
           headers: {
             ...c.req.raw.headers,
-            host: "app.opencode.ai",
+            host: targetHost,
           },
         })
         response.headers.set(

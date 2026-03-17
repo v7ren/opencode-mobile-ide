@@ -522,11 +522,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
   }
 
-  const agentList = createMemo(() =>
-    sync.data.agent
+  const agentList = createMemo(() => {
+    const agents = sync.data.agent
+    if (!Array.isArray(agents)) return []
+    return agents
       .filter((agent) => !agent.hidden && agent.mode !== "primary")
-      .map((agent): AtOption => ({ type: "agent", name: agent.name, display: agent.name })),
-  )
+      .map((agent): AtOption => ({ type: "agent", name: agent.name, display: agent.name }))
+  })
   const agentNames = createMemo(() => local.agent.list().map((agent) => agent.name))
 
   const handleAtSelect = (option: AtOption | undefined) => {
@@ -591,7 +593,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         type: "builtin" as const,
       }))
 
-    const custom = sync.data.command.map((cmd) => ({
+    const rawCommands = sync.data.command
+    const custom = (Array.isArray(rawCommands) ? rawCommands : []).map((cmd) => ({
       id: `custom.${cmd.name}`,
       trigger: cmd.name,
       title: cmd.name,

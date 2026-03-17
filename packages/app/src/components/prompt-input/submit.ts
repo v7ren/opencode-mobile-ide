@@ -298,6 +298,12 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const currentAgent = local.agent.current()
     const variant = local.model.variant.current()
     if (!currentModel || !currentAgent) {
+      console.log("DEBUG: Model or agent missing", { 
+        currentModel: currentModel?.id, 
+        currentAgent: currentAgent?.name,
+        agentsList: local.agent.list().map(a => a.name),
+        syncStatus: sync.status
+      })
       showToast({
         title: language.t("prompt.toast.modelAgentRequired.title"),
         description: language.t("prompt.toast.modelAgentRequired.description"),

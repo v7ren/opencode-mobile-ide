@@ -1,13 +1,15 @@
-import { createEffect, createMemo, Match, on, onCleanup, Switch } from "solid-js"
+import { createEffect, createMemo, Match, on, onCleanup, Show, Switch } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import type { FileSearchHandle } from "@opencode-ai/ui/file"
+import { CodeMirrorEditor } from "./CodeMirrorEditor"
 import { useFileComponent } from "@opencode-ai/ui/context/file"
 import { cloneSelectedLineRange, previewSelectedLines } from "@opencode-ai/ui/pierre/selection-bridge"
 import { createLineCommentController } from "@opencode-ai/ui/line-comment-annotations"
 import { sampledChecksum } from "@opencode-ai/util/encode"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { IconButton } from "@opencode-ai/ui/icon-button"
+import { Button } from "@opencode-ai/ui/button"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
 import { showToast } from "@opencode-ai/ui/toast"
@@ -52,7 +54,7 @@ function FileCommentMenu(props: {
   )
 }
 
-export function FileTabContent(props: { tab: string }) {
+export function FileTabContent(props: { tab: string; onShowFileTree?: () => void }) {
   const file = useFile()
   const comments = useComments()
   const language = useLanguage()
@@ -159,6 +161,13 @@ export function FileTabContent(props: { tab: string }) {
     return comments.list(p)
   })
 
+  // Determine if file is editable (text files only)
+  const isEditable = createMemo(() => {
+    const content = state()?.content
+    if (!content) return false
+    return content.type === "text" && !content.encoding // Not base64 encoded (not images/media)
+  })
+
   const commentedLines = createMemo(() => fileComments().map((comment) => comment.selection))
 
   const [note, setNote] = createStore({
@@ -167,10 +176,62 @@ export function FileTabContent(props: { tab: string }) {
     selected: null as SelectedLineRange | null,
   })
 
+  // Edit mode state
+  const [editState, setEditState] = createStore({
+    isEditing: false,
+    editedContent: "",
+    isSaving: false,
+    isDirty: false,
+  })
+
   const syncSelected = (range: SelectedLineRange | null) => {
     const p = path()
     if (!p) return
     file.setSelectedLines(p, range ? cloneSelectedLineRange(range) : null)
+  }
+
+  const startEdit = () => {
+    if (!isEditable()) return
+    const content = contents()
+    setEditState({
+      isEditing: true,
+      editedContent: content,
+      isDirty: false,
+      isSaving: false,
+    })
+  }
+
+  const stopEdit = () => {
+    setEditState({
+      isEditing: false,
+      editedContent: "",
+      isDirty: false,
+      isSaving: false,
+    })
+  }
+
+  const handleContentChange = (value: string) => {
+    setEditState("editedContent", value)
+    setEditState("isDirty", value !== contents())
+  }
+
+  const saveFile = async () => {
+    const p = path()
+    if (!p || editState.isSaving) return
+
+    setEditState("isSaving", true)
+    try {
+      const success = await file.save(p, editState.editedContent)
+      if (success) {
+        setEditState("isDirty", false)
+        showToast({
+          title: language.t("common.save") || "Saved",
+          description: `${p}`,
+        })
+      }
+    } finally {
+      setEditState("isSaving", false)
+    }
   }
 
   const activeSelection = () => note.selected ?? selectedLines()
@@ -235,12 +296,47 @@ export function FileTabContent(props: { tab: string }) {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (activeFileTab() !== props.tab) return
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
-      if (event.key.toLowerCase() !== "f") return
 
-      event.preventDefault()
-      event.stopPropagation()
-      find?.focus()
+      // Ctrl+S / Cmd+S to save when editing
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "s") {
+        if (editState.isEditing) {
+          event.preventDefault()
+          event.stopPropagation()
+          void saveFile()
+          return
+        }
+      }
+
+      // Esc to exit edit mode
+      if (event.key === "Escape" && editState.isEditing) {
+        event.preventDefault()
+        event.stopPropagation()
+        stopEdit()
+        return
+      }
+
+      // Ctrl+F for find when not editing
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "f") {
+        if (!editState.isEditing) {
+          event.preventDefault()
+          event.stopPropagation()
+          find?.focus()
+        }
+        return
+      }
+
+      // Ctrl+E to toggle edit mode
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "e") {
+        event.preventDefault()
+        event.stopPropagation()
+        if (editState.isEditing && editState.isDirty) {
+          // In edit mode with unsaved changes: don't toggle, show tooltip or just save
+          void saveFile()
+        } else {
+          editState.isEditing ? stopEdit() : startEdit()
+        }
+        return
+      }
     }
 
     window.addEventListener("keydown", onKeyDown, { capture: true })
@@ -398,6 +494,22 @@ export function FileTabContent(props: { tab: string }) {
     if (restoreFrame !== undefined) cancelAnimationFrame(restoreFrame)
   })
 
+  const renderEditor = () => (
+    <div class="relative h-full">
+      <CodeMirrorEditor
+        value={editState.editedContent}
+        filename={path() ?? ""}
+        onChange={handleContentChange}
+        onSave={saveFile}
+      />
+      <div class="absolute bottom-4 right-4 flex items-center gap-2 pointer-events-none">
+        <Show when={editState.isDirty}>
+          <span class="text-xs text-text-weak bg-surface-base px-2 py-1 rounded">{language.t("common.unsavedChanges") ?? "Modified"}</span>
+        </Show>
+      </div>
+    </div>
+  )
+
   const renderFile = (source: string) => (
     <div class="relative overflow-hidden pb-40">
       <Dynamic
@@ -446,23 +558,109 @@ export function FileTabContent(props: { tab: string }) {
   )
 
   return (
-    <Tabs.Content value={props.tab} class="mt-3 relative h-full">
-      <ScrollView
-        class="h-full"
-        viewportRef={(el: HTMLDivElement) => {
-          scroll = el
-          restoreScroll()
-        }}
-        onScroll={handleScroll as any}
-      >
-        <Switch>
-          <Match when={state()?.loaded}>{renderFile(contents())}</Match>
-          <Match when={state()?.loading}>
-            <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}...</div>
-          </Match>
-          <Match when={state()?.error}>{(err) => <div class="px-6 py-4 text-text-weak">{err()}</div>}</Match>
-        </Switch>
-      </ScrollView>
+    <Tabs.Content value={props.tab} class="mt-3 relative h-full flex flex-col">
+      {/* Toolbar */}
+      <Show when={state()?.loaded}>
+        <div class="flex items-center justify-between px-4 py-2 border-b border-border-weaker-base min-h-[40px]">
+          <div class="flex items-center gap-2">
+            {/* Mobile File Tree Button */}
+            <Show when={props.onShowFileTree}>
+              <IconButton
+                icon="file-tree"
+                variant="ghost"
+                size="small"
+                onClick={props.onShowFileTree}
+                title="Show file tree"
+                aria-label="Show file tree"
+              />
+            </Show>
+            <Show when={path()}>
+              <span class="text-sm text-text-base font-medium truncate max-w-md" title={path() ?? undefined}>
+                {path()?.split("/").pop()}
+              </span>
+            </Show>
+          </div>
+          <div class="flex items-center gap-2">
+            {/* Screen toggle: Agent/Edit View Switch */}
+            <Show when={isEditable()}>
+              <div class="flex items-center gap-1 bg-surface-base rounded-md p-0.5 border border-border-weaker-base">
+                <Button
+                  size="small"
+                  variant={editState.isEditing ? "ghost" : "secondary"}
+                  class={!editState.isEditing ? "bg-surface-active" : ""}
+                  onClick={() => {
+                    if (editState.isEditing) stopEdit()
+                  }}
+                  title="Agent view mode (view and comment)"
+                >
+                  Agent
+                </Button>
+                <Button
+                  size="small"
+                  variant={editState.isEditing ? "secondary" : "ghost"}
+                  class={editState.isEditing ? "bg-surface-active" : ""}
+                  onClick={() => {
+                    if (!editState.isEditing) startEdit()
+                  }}
+                  title="Edit mode (edit file content)"
+                >
+                  Edit
+                </Button>
+              </div>
+            </Show>
+            <Switch>
+              <Match when={editState.isEditing && editState.isDirty}>
+                <Button
+                  size="small"
+                  variant="primary"
+                  onClick={() => void saveFile()}
+                  disabled={editState.isSaving}
+                  loading={editState.isSaving}
+                >
+                  {language.t("common.save") || "Save"}
+                </Button>
+              </Match>
+              <Match when={editState.isEditing}>
+                <Button
+                  size="small"
+                  variant="ghost"
+                  onClick={stopEdit}
+                  disabled={editState.isSaving}
+                >
+                  {language.t("common.done") || "Done"}
+                </Button>
+              </Match>
+            </Switch>
+          </div>
+        </div>
+      </Show>
+      
+      {/* Content */}
+      <Switch>
+        <Match when={editState.isEditing}>
+          <div class="flex-1 min-h-0 overflow-auto">
+            {renderEditor()}
+          </div>
+        </Match>
+        <Match when={!editState.isEditing}>
+          <ScrollView
+            class="h-full flex-1"
+            viewportRef={(el: HTMLDivElement) => {
+              scroll = el
+              restoreScroll()
+            }}
+            onScroll={handleScroll as any}
+          >
+            <Switch>
+              <Match when={state()?.loaded}>{renderFile(contents())}</Match>
+              <Match when={state()?.loading}>
+                <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}...</div>
+              </Match>
+              <Match when={state()?.error}>{(err) => <div class="px-6 py-4 text-text-weak">{err()}</div>}</Match>
+            </Switch>
+          </ScrollView>
+        </Match>
+      </Switch>
     </Tabs.Content>
   )
 }

@@ -128,12 +128,19 @@ export async function bootstrapDirectory(input: {
       input.sdk.provider.list().then((x) => {
         input.setStore("provider", normalizeProviderList(x.data!))
       }),
-    agent: () => input.sdk.app.agents().then((x) => input.setStore("agent", x.data ?? [])),
+    agent: () => input.sdk.app.agents().then((x) => {
+      console.log("DEBUG bootstrap: agents API response:", x.data)
+      input.setStore("agent", x.data ?? [])
+    }).catch((err) => {
+      console.error("DEBUG bootstrap: agents API FAILED:", err)
+      throw err
+    }),
     config: () => input.sdk.config.get().then((x) => input.setStore("config", x.data!)),
   }
 
   try {
     await Promise.all(Object.values(blockingRequests).map((p) => retry(p)))
+    console.log("DEBUG bootstrap: after blocking requests, store.agent =", input.store.agent)
   } catch (err) {
     console.error("Failed to bootstrap instance", err)
     const project = getFilename(input.directory)

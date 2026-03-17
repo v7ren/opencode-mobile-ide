@@ -108,6 +108,10 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
     const HEARTBEAT_TIMEOUT_MS = 15_000
     let lastEventAt = Date.now()
     let heartbeat: ReturnType<typeof setTimeout> | undefined
+    let reconnectAttempt = 0
+    const SSE_MAX_RETRY_ATTEMPTS = 10
+    const SSE_RETRY_DELAY_MS = 1000
+    const SSE_MAX_RETRY_DELAY_MS = 30_000
     const resetHeartbeat = () => {
       lastEventAt = Date.now()
       if (heartbeat) clearTimeout(heartbeat)
@@ -132,14 +136,19 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
         try {
           const events = await eventSdk.global.event({
             signal: attempt.signal,
+            sseDefaultRetryDelay: SSE_RETRY_DELAY_MS,
+            sseMaxRetryAttempts: SSE_MAX_RETRY_ATTEMPTS,
+            sseMaxRetryDelay: SSE_MAX_RETRY_DELAY_MS,
             onSseError: (error) => {
               if (aborted(error)) return
               if (streamErrorLogged) return
               streamErrorLogged = true
+              reconnectAttempt++
               console.error("[global-sdk] event stream error", {
                 url: currentServer.http.url,
                 fetch: eventFetch ? "platform" : "webview",
                 error,
+                reconnectAttempt,
               })
             },
           })
@@ -148,6 +157,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
           for await (const event of events.stream) {
             resetHeartbeat()
             streamErrorLogged = false
+            reconnectAttempt = 0
             const directory = event.directory ?? "global"
             const payload = event.payload
             const k = key(directory, payload)

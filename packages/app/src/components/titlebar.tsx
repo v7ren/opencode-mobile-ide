@@ -48,6 +48,15 @@ export function Titlebar() {
   const mac = createMemo(() => platform.platform === "desktop" && platform.os === "macos")
   const windows = createMemo(() => platform.platform === "desktop" && platform.os === "windows")
   const web = createMemo(() => platform.platform === "web")
+
+  const handleMobileMenuClick = () => {
+    if (layout.sessionMobileMenu?.mode() === "files") {
+      // Signal to session page to switch to files tab
+      layout.sessionMobileMenu?.press()
+    } else {
+      layout.mobileSidebar.toggle()
+    }
+  }
   const zoom = () => platform.webviewZoom?.() ?? 1
   const minHeight = () => (mac() ? `${40 / zoom()}px` : undefined)
 
